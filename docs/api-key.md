@@ -264,6 +264,39 @@ Behavior:
 4. Service writes `revoked:jti:{jti}` with TTL to token expiry.
 5. The rate limiter begins rejecting the token immediately.
 
+## Health Check APIs
+
+The service exposes three health endpoints:
+
+- `GET /livez`: process liveness only
+- `GET /readyz`: readiness check including Redis connectivity
+- `GET /healthz`: combined dependency health response
+
+Example `GET /livez` response:
+
+```json
+{
+  "service": "api-key",
+  "status": "ok"
+}
+```
+
+Example `GET /readyz` response:
+
+```json
+{
+  "service": "api-key",
+  "status": "ok",
+  "checks": {
+    "redis": {
+      "status": "ok"
+    }
+  }
+}
+```
+
+If Redis is unavailable, `readyz` and `healthz` return `503 Service Unavailable` and include the Redis error in the response body.
+
 ## Redis Keys
 
 - `api:config:{api_id}`

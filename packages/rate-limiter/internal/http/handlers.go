@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/rishi/api-rate-limiter/packages/rate-limiter/internal/auth"
 	"github.com/rishi/api-rate-limiter/packages/rate-limiter/internal/proxy"
@@ -12,14 +14,26 @@ type Handler struct {
 	verifier *auth.Verifier
 	limiter  *ratelimit.Service
 	proxy    *proxy.ReverseProxy
+	health   func(context.Context) error
 }
 
-func NewHandler(verifier *auth.Verifier, limiter *ratelimit.Service, reverseProxy *proxy.ReverseProxy) *Handler {
-	return &Handler{verifier: verifier, limiter: limiter, proxy: reverseProxy}
+func NewHandler(verifier *auth.Verifier, limiter *ratelimit.Service, reverseProxy *proxy.ReverseProxy, health func(context.Context) error) *Handler {
+	return &Handler{verifier: verifier, limiter: limiter, proxy: reverseProxy, health: health}
 }
 
-func (h *Handler) Health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+func (h *Handler) Live(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"service": "rate-limiter",
+		"status":  "ok",
+	})
+}
+
+func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
+	h.writeDependencyHealth(w, r)
+}
+
+func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
+	h.writeDependencyHealth(w, r)
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -60,4 +74,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
+}
+
+func (h *Handler) writeDependencyHealth(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	statusCode := http.StatusOK
+	status := "ok"
+	redisStatus := map[string]string{"status": "ok"}
+
+	if err := h.health(ctx); err != nil {
+		statusCode = http.StatusServiceUnavailable
+		status = "degraded"
+		redisStatus = map[string]string{
+			"status": "error",
+			"error":  err.Error(),
+		}
+	}
+
+	writeJSON(w, statusCode, map[string]any{
+		"service": "rate-limiter",
+		"status":  status,
+		"checks": map[string]any{
+			"redis": redisStatus,
+		},
+	})
 }

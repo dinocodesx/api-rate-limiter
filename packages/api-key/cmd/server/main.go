@@ -37,7 +37,9 @@ func main() {
 	store := redisstore.NewStore(client)
 	signer := jwtlib.NewSigner(cfg.JWTSecret, cfg.TokenIssuer)
 	verifier := jwtlib.NewVerifier(cfg.JWTSecret)
-	handlers := httpapi.NewHandlers(store, signer, verifier)
+	handlers := httpapi.NewHandlers(store, signer, verifier, func(ctx context.Context) error {
+		return client.Ping(ctx).Err()
+	})
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           httpapi.NewRouter(handlers),

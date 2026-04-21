@@ -20,10 +20,11 @@ type Handlers struct {
 	store    *redisstore.Store
 	signer   *jwtlib.Signer
 	verifier *jwtlib.Verifier
+	health   func(context.Context) error
 }
 
-func NewHandlers(store *redisstore.Store, signer *jwtlib.Signer, verifier *jwtlib.Verifier) *Handlers {
-	return &Handlers{store: store, signer: signer, verifier: verifier}
+func NewHandlers(store *redisstore.Store, signer *jwtlib.Signer, verifier *jwtlib.Verifier, health func(context.Context) error) *Handlers {
+	return &Handlers{store: store, signer: signer, verifier: verifier, health: health}
 }
 
 type createAPIRequest struct {
@@ -49,8 +50,19 @@ type revokeRequest struct {
 	APIKeyID string `json:"api_key_id"`
 }
 
-func (h *Handlers) Health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+func (h *Handlers) Live(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"service": "api-key",
+		"status":  "ok",
+	})
+}
+
+func (h *Handlers) Ready(w http.ResponseWriter, r *http.Request) {
+	h.writeDependencyHealth(w, r)
+}
+
+func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
+	h.writeDependencyHealth(w, r)
 }
 
 func (h *Handlers) CreateAPI(w http.ResponseWriter, r *http.Request) {
@@ -277,4 +289,30 @@ func randomID(prefix string) string {
 	buffer := make([]byte, 8)
 	_, _ = rand.Read(buffer)
 	return prefix + "_" + hex.EncodeToString(buffer)
+}
+
+func (h *Handlers) writeDependencyHealth(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	statusCode := http.StatusOK
+	status := "ok"
+	redisStatus := map[string]string{"status": "ok"}
+
+	if err := h.health(ctx); err != nil {
+		statusCode = http.StatusServiceUnavailable
+		status = "degraded"
+		redisStatus = map[string]string{
+			"status": "error",
+			"error":  err.Error(),
+		}
+	}
+
+	writeJSON(w, statusCode, map[string]any{
+		"service": "api-key",
+		"status":  status,
+		"checks": map[string]any{
+			"redis": redisStatus,
+		},
+	})
 }

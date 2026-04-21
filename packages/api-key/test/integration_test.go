@@ -2,6 +2,7 @@ package test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,9 +19,23 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	store := redisstore.NewStore(client)
-	handlers := httpapi.NewHandlers(store, jwtlib.NewSigner("secret", "issuer"), jwtlib.NewVerifier("secret"))
+	handlers := httpapi.NewHandlers(store, jwtlib.NewSigner("secret", "issuer"), jwtlib.NewVerifier("secret"), func(ctx context.Context) error {
+		return client.Ping(ctx).Err()
+	})
 	server := httptest.NewServer(httpapi.NewRouter(handlers))
 	defer server.Close()
+
+	resp := doNoBody(t, server.Client(), http.MethodGet, server.URL+"/livez")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected livez 200, got %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	resp = doNoBody(t, server.Client(), http.MethodGet, server.URL+"/readyz")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected readyz 200, got %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
 
 	createBody := map[string]any{
 		"api_id":       "payments-prod",
@@ -34,7 +49,7 @@ func TestAPIKeyLifecycle(t *testing.T) {
 			"bucket_ttl_sec": 120,
 		}},
 	}
-	resp := doJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/apis", createBody)
+	resp = doJSON(t, server.Client(), http.MethodPost, server.URL+"/v1/apis", createBody)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected create api 201, got %d", resp.StatusCode)
 	}
@@ -85,6 +100,19 @@ func doJSON(t *testing.T, client *http.Client, method, url string, payload any) 
 		t.Fatalf("new request: %v", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	return response
+}
+
+func doNoBody(t *testing.T, client *http.Client, method, url string) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		t.Fatalf("do request: %v", err)

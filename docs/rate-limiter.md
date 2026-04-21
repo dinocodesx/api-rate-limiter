@@ -252,6 +252,39 @@ Content-Type: application/json
 }
 ```
 
+## Health Check APIs
+
+The service exposes three health endpoints:
+
+- `GET /livez`: confirms the process is running
+- `GET /readyz`: checks Redis availability for policy and bucket operations
+- `GET /healthz`: combined dependency health response
+
+Example `GET /livez` response:
+
+```json
+{
+  "service": "rate-limiter",
+  "status": "ok"
+}
+```
+
+Example `GET /readyz` response:
+
+```json
+{
+  "service": "rate-limiter",
+  "status": "ok",
+  "checks": {
+    "redis": {
+      "status": "ok"
+    }
+  }
+}
+```
+
+If Redis is unavailable, `readyz` and `healthz` return `503 Service Unavailable` and include the Redis error in the payload.
+
 ## Proxying Rules
 
 `internal/proxy/reverse_proxy.go` forwards allowed requests to the upstream URL from Redis.

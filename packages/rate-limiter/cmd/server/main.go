@@ -41,7 +41,9 @@ func main() {
 	revocationStore := redisstore.NewRevocationStore(client)
 	verifier := auth.NewVerifier(cfg.JWTSecret, cfg.ExpectedIssuer, revocationStore)
 	limiter := ratelimit.NewService(policyStore, bucketStore)
-	handler := httpapi.NewHandler(verifier, limiter, proxy.New())
+	handler := httpapi.NewHandler(verifier, limiter, proxy.New(), func(ctx context.Context) error {
+		return client.Ping(ctx).Err()
+	})
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           httpapi.NewRouter(handler),

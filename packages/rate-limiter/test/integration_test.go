@@ -56,9 +56,23 @@ func TestRateLimiterAllowsThenBlocks(t *testing.T) {
 
 	verifier := auth.NewVerifier("secret", "api-key-service", revocationStore)
 	limiter := ratelimit.NewService(policyStore, bucketStore)
-	handler := httpapi.NewHandler(verifier, limiter, proxy.New())
+	handler := httpapi.NewHandler(verifier, limiter, proxy.New(), func(ctx context.Context) error {
+		return client.Ping(ctx).Err()
+	})
 	server := httptest.NewServer(httpapi.NewRouter(handler))
 	defer server.Close()
+
+	resp := doNoAuthRequest(t, http.MethodGet, server.URL+"/livez")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected livez 200, got %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	resp = doNoAuthRequest(t, http.MethodGet, server.URL+"/readyz")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected readyz 200, got %d", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
 
 	token := signToken(t, auth.APIKeyClaims{
 		Issuer:    "api-key-service",
@@ -70,7 +84,7 @@ func TestRateLimiterAllowsThenBlocks(t *testing.T) {
 		JWTID:     "jti_123",
 	})
 
-	resp := sendRequest(t, server.URL+"/v1/charges", token, "payments-prod")
+	resp = sendRequest(t, server.URL+"/v1/charges", token, "payments-prod")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected first request 200, got %d", resp.StatusCode)
 	}
@@ -88,7 +102,9 @@ func TestRateLimiterRejectsRevokedToken(t *testing.T) {
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	verifier := auth.NewVerifier("secret", "api-key-service", redisstore.NewRevocationStore(client))
 	limiter := ratelimit.NewService(redisstore.NewPolicyStore(client), redisstore.NewBucketStore(client))
-	handler := httpapi.NewHandler(verifier, limiter, proxy.New())
+	handler := httpapi.NewHandler(verifier, limiter, proxy.New(), func(ctx context.Context) error {
+		return client.Ping(ctx).Err()
+	})
 	server := httptest.NewServer(httpapi.NewRouter(handler))
 	defer server.Close()
 
@@ -120,6 +136,19 @@ func sendRequest(t *testing.T, url string, token string, apiID string) *http.Res
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-API-ID", apiID)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	return resp
+}
+
+func doNoAuthRequest(t *testing.T, method, url string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("do request: %v", err)

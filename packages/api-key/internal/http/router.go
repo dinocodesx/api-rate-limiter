@@ -4,6 +4,8 @@ import "net/http"
 
 func NewRouter(handlers *Handlers) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /livez", handlers.Live)
+	mux.HandleFunc("GET /readyz", handlers.Ready)
 	mux.HandleFunc("GET /healthz", handlers.Health)
 	mux.HandleFunc("POST /v1/apis", handlers.CreateAPI)
 	mux.HandleFunc("GET /v1/apis/", handlers.GetAPI)
