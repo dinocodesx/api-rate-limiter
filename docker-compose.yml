@@ -1,0 +1,31 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api-key:
+    build:
+      context: ./packages/api-key
+    environment:
+      PORT: "8080"
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: change-me
+      TOKEN_ISSUER: api-key-service
+    depends_on:
+      - redis
+    ports:
+      - "8080:8080"
+
+  rate-limiter:
+    build:
+      context: ./packages/rate-limiter
+    environment:
+      PORT: "8081"
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: change-me
+      EXPECTED_ISSUER: api-key-service
+    depends_on:
+      - redis
+    ports:
+      - "8081:8081"
