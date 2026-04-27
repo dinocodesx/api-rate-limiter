@@ -2,3 +2,11 @@
 .env.*
 **/.env
 **/.env.*
+node_modules
+.pnpm-store
+.turbo
+.next
+dist
+coverage
+*.log
+packages/db/generated
